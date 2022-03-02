@@ -1,0 +1,126 @@
+--- proc.c
++++ proc.c
+@@ -210,6 +210,9 @@ fork(void)
+ 
+   safestrcpy(np->name, curproc->name, sizeof(curproc->name));
+ 
++  // Set new process scheduling number as 0.
++  np->schedulednumber = 0;
++
+   pid = np->pid;
+ 
+   acquire(&ptable.lock);
+@@ -261,6 +264,9 @@ exit(void)
+     }
+   }
+ 
++  // Print the number of context switches.
++  cprintf("\n%s(%d) performed %d context switches\n", curproc->name, curproc->pid, curproc->schedulednumber);
++
+   // Jump into the scheduler, never to return.
+   curproc->state = ZOMBIE;
+   sched();
+@@ -325,7 +331,7 @@ scheduler(void)
+   struct proc *p;
+   struct cpu *c = mycpu();
+   c->proc = 0;
+-  
++
+   for(;;){
+     // Enable interrupts on this processor.
+     sti();
+@@ -342,6 +348,7 @@ scheduler(void)
+       c->proc = p;
+       switchuvm(p);
+       p->state = RUNNING;
++      p->schedulednumber++;
+ 
+       swtch(&(c->scheduler), p->context);
+       switchkvm();
+@@ -351,7 +358,6 @@ scheduler(void)
+       c->proc = 0;
+     }
+     release(&ptable.lock);
+-
+   }
+ }
+ 
+--- proc.h
++++ proc.h
+@@ -49,6 +49,7 @@ struct proc {
+   struct file *ofile[NOFILE];  // Open files
+   struct inode *cwd;           // Current directory
+   char name[16];               // Process name (debugging)
++  int schedulednumber;         // Number of scheduling
+ };
+ 
+ // Process memory is laid out contiguously, low addresses first:
+--- syscall.c
++++ syscall.c
+@@ -103,6 +103,8 @@ extern int sys_unlink(void);
+ extern int sys_wait(void);
+ extern int sys_write(void);
+ extern int sys_uptime(void);
++extern int sys_getcswitch(void);
++extern int sys_setcswitch(void);
+ 
+ static int (*syscalls[])(void) = {
+ [SYS_fork]    sys_fork,
+@@ -126,6 +128,8 @@ static int (*syscalls[])(void) = {
+ [SYS_link]    sys_link,
+ [SYS_mkdir]   sys_mkdir,
+ [SYS_close]   sys_close,
++[SYS_getcswitch] sys_getcswitch,
++[SYS_setcswitch] sys_setcswitch
+ };
+ 
+ void
+--- syscall.h
++++ syscall.h
+@@ -20,3 +20,5 @@
+ #define SYS_link   19
+ #define SYS_mkdir  20
+ #define SYS_close  21
++#define SYS_getcswitch 22
++#define SYS_setcswitch 23
+--- sysproc.c
++++ sysproc.c
+@@ -89,3 +89,19 @@ sys_uptime(void)
+   release(&tickslock);
+   return xticks;
+ }
++
++int
++sys_getcswitch(void)
++{
++	return myproc()->schedulednumber;
++}
++
++int
++sys_setcswitch(void)
++{
++	int n;
++	if (argint(0, &n) < 0)
++	  return -1;
++	myproc()->schedulednumber = n;
++	return n;
++}
+--- user.h
++++ user.h
+@@ -23,6 +23,8 @@ int getpid(void);
+ char* sbrk(int);
+ int sleep(int);
+ int uptime(void);
++int getcswitch(void);
++int setcswitch(int);
+ 
+ // ulib.c
+ int stat(const char*, struct stat*);
+--- usys.S
++++ usys.S
+@@ -29,3 +29,5 @@ SYSCALL(getpid)
+ SYSCALL(sbrk)
+ SYSCALL(sleep)
+ SYSCALL(uptime)
++SYSCALL(getcswitch)
++SYSCALL(setcswitch)

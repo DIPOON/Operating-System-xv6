@@ -210,6 +210,9 @@ fork(void)
 
   safestrcpy(np->name, curproc->name, sizeof(curproc->name));
 
+  // Set new process scheduling number as 0.
+  np->schedulednumber = 0;
+
   pid = np->pid;
 
   acquire(&ptable.lock);
@@ -260,6 +263,9 @@ exit(void)
         wakeup1(initproc);
     }
   }
+
+  // Print the number of context switches.
+  cprintf("\n%s(%d) performed %d context switches\n", curproc->name, curproc->pid, curproc->schedulednumber);
 
   // Jump into the scheduler, never to return.
   curproc->state = ZOMBIE;
@@ -325,7 +331,7 @@ scheduler(void)
   struct proc *p;
   struct cpu *c = mycpu();
   c->proc = 0;
-  
+
   for(;;){
     // Enable interrupts on this processor.
     sti();
@@ -342,6 +348,7 @@ scheduler(void)
       c->proc = p;
       switchuvm(p);
       p->state = RUNNING;
+      p->schedulednumber++;
 
       swtch(&(c->scheduler), p->context);
       switchkvm();
@@ -351,7 +358,6 @@ scheduler(void)
       c->proc = 0;
     }
     release(&ptable.lock);
-
   }
 }
 

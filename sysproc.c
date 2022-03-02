@@ -89,3 +89,19 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+int
+sys_getcswitch(void)
+{
+	return myproc()->schedulednumber;
+}
+
+int
+sys_setcswitch(void)
+{
+	int n;
+	if (argint(0, &n) < 0)
+	  return -1;
+	myproc()->schedulednumber = n;
+	return n;
+}
