@@ -112,6 +112,21 @@ found:
   memset(p->context, 0, sizeof *p->context);
   p->context->eip = (uint)forkret;
 
+  // Register in pstat pst.
+  for(int i = 0; i < NPROC; i++){
+    if(pst.inuse[i] == 0){
+      pst.inuse[i] = 1;
+      pst.pid[i] = p->pid;
+      pst.priority[i] = 0;
+      pst.state[i] = RUNNABLE;
+      for(int j = 0; j < 3; j++){
+        pst.ticks[i][j] = 0;
+        pst.wait_ticks[i][j] = 0;
+      }
+      break;
+    }
+  }
+
   return p;
 }
 
@@ -319,39 +334,108 @@ wait(void)
 //  - swtch to start running that process
 //  - eventually that process transfers control
 //      via swtch back to the scheduler.
+struct pstat pst;
+struct proc* queue[2][NPROC];
 void
 scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
   c->proc = 0;
-  
+
   for(;;){
     // Enable interrupts on this processor.
     sti();
 
-    // Loop over process table looking for process to run.
+    // Check pstat
+    for(int i = 0; i < NPROC; i++){
+      if (pst.inuse[i] != 1)
+        continue;
+      if (pst.priority[i] == 0 && pst.ticks[i][0] >= 1){
+        pst.priority[i] = 1;
+	pst.ticks[i][0] = 0;
+      }
+      else if (pst.priority[i] == 1 && pst.ticks[i][1] >= 4){
+        pst.priority[i] = 2;
+	pst.ticks[i][1] = 0;
+      }
+      else if (pst.priority[i] == 2 && pst.ticks[i][2] >= 16)
+	pst.ticks[i][2] = 0;
+    }
+    //cprintf("***********************************\n");
+
+    // Choose correct process to schedule as schedulingpstatnum
+    int schedulingpstatnum = -1;
+    int comparepriority = 100;
+    int comparetick[3];
+    comparetick[0] = -1;
+    comparetick[1] = -1;
+    comparetick[2] = -1;
+    for(int i = 0; i < NPROC; i++){
+      for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+        if (p->pid != pst.pid[i] || p->state != RUNNABLE)
+          continue;
+        if (pst.inuse[i] != 1 || pst.priority[i] > comparepriority){
+	      continue;
+	}
+        // Keep going ongoing process
+        if (pst.ticks[i][pst.priority[i]] < comparetick[pst.priority[i]]){
+	      continue;
+	}
+        schedulingpstatnum = i;
+	comparepriority = pst.priority[schedulingpstatnum];
+        for(int j = 0; j < 3; j++){
+	  comparetick[j] = pst.ticks[schedulingpstatnum][pst.priority[schedulingpstatnum]];
+	}
+      }
+    }
+    // no available process to schedule.
+    if(schedulingpstatnum == -1)
+      continue;
+    //cprintf("pstat : %d, pid : %d  will be going\n", schedulingpstatnum, pst.pid[schedulingpstatnum]);
+    for(int i = 0; i < NPROC; i++){
+      //if (pst.inuse[i] == 1)
+        //cprintf("pid : %d, prior : %d, ticks: %d\n", pst.pid[i], pst.priority[i], pst.ticks[i][pst.priority[i]]);
+    }
     acquire(&ptable.lock);
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
-        continue;
+      //if(p->state == RUNNABLE)
+        //cprintf("pid %d pstate %d\n",p->pid, p->state);
+    }
 
+    // Loop over queue looking for process to run.
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(p->state != RUNNABLE || p->pid != pst.pid[schedulingpstatnum]){
+          continue;
+      }
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
       // before jumping back to us.
+      //cprintf("so you want scheduling pid : %d, proc state : %d \n", p->pid, p->state);
       c->proc = p;
       switchuvm(p);
       p->state = RUNNING;
-
+      
       swtch(&(c->scheduler), p->context);
       switchkvm();
+      // not enough to follow proc state
+      pst.state[schedulingpstatnum] = p->state;
+      pst.wait_ticks[schedulingpstatnum][pst.priority[schedulingpstatnum]] = 0;
+      if(pst.state[schedulingpstatnum] == RUNNABLE)
+        pst.ticks[schedulingpstatnum][pst.priority[schedulingpstatnum]]++;
+      else if(pst.state[schedulingpstatnum] != RUNNABLE)
+	pst.ticks[schedulingpstatnum][pst.priority[schedulingpstatnum]] = 0;
+      if(pst.state[schedulingpstatnum] == ZOMBIE)
+	pst.inuse[schedulingpstatnum] = 0;
 
       // Process is done running for now.
       // It should have changed its p->state before coming back.
       c->proc = 0;
+      break;
     }
-    release(&ptable.lock);
-
+    
+  release(&ptable.lock);
+     
   }
 }
 
